@@ -1,6 +1,6 @@
 #!/bin/bash -ex
 #
-# Copyright (c) 2012-2019 Robert Nelson <robertcnelson@gmail.com>
+# Copyright (c) 2012-2021 Robert Nelson <robertcnelson@gmail.com>
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -252,6 +252,12 @@ if [ "x${host_arch}" != "xarmv7l" ] && [ "x${host_arch}" != "xaarch64" ] ; then
 	fi
 fi
 
+if [ "x${host_arch}" != "xriscv64" ] ; then
+	if [ "x${deb_arch}" = "xriscv64" ] ; then
+		sudo cp $(which qemu-riscv64-static) "${tempdir}/usr/bin/"
+	fi
+fi
+
 chroot_mount_run
 echo "Log: Running: debootstrap second-stage in [${tempdir}]"
 sudo chroot "${tempdir}" debootstrap/debootstrap --second-stage
@@ -281,6 +287,7 @@ if [ "x${chroot_very_small_image}" = "xenable" ] ; then
 	echo "" >> /tmp/01_nodoc
 
 	sudo mv /tmp/01_nodoc "${tempdir}/etc/dpkg/dpkg.cfg.d/01_nodoc"
+	sudo chown root:root "${tempdir}/etc/dpkg/dpkg.cfg.d/01_nodoc"
 
 	sudo mkdir -p "${tempdir}/etc/apt/apt.conf.d/" || true
 
@@ -290,10 +297,12 @@ if [ "x${chroot_very_small_image}" = "xenable" ] ; then
 	echo "  pkgcache \"\";" >> /tmp/02nocache
 	echo "}" >> /tmp/02nocache
 	sudo mv  /tmp/02nocache "${tempdir}/etc/apt/apt.conf.d/02nocache"
+	sudo chown root:root "${tempdir}/etc/apt/apt.conf.d/02nocache"
 
 	#apt: drop translations...
 	echo "Acquire::Languages \"none\";" > /tmp/02translations
 	sudo mv /tmp/02translations "${tempdir}/etc/apt/apt.conf.d/02translations"
+	sudo chown root:root "${tempdir}/etc/apt/apt.conf.d/02translations"
 
 	echo "Log: after locale/man purge"
 	report_size
@@ -310,6 +319,7 @@ echo "path-exclude=/etc/kernel/postrm.d/zz-flash-kernel" >> /tmp/01_noflash_kern
 echo ""  >> /tmp/01_noflash_kernel
 
 sudo mv /tmp/01_noflash_kernel "${tempdir}/etc/dpkg/dpkg.cfg.d/01_noflash_kernel"
+sudo chown root:root "${tempdir}/etc/dpkg/dpkg.cfg.d/01_noflash_kernel"
 
 sudo mkdir -p "${tempdir}/usr/share/flash-kernel/db/" || true
 sudo cp -v "${OIB_DIR}/target/other/rcn-ee.db" "${tempdir}/usr/share/flash-kernel/db/"
@@ -317,34 +327,51 @@ sudo cp -v "${OIB_DIR}/target/other/rcn-ee.db" "${tempdir}/usr/share/flash-kerne
 #generic apt.conf tweaks for flash/mmc devices to save on wasted space...
 sudo mkdir -p "${tempdir}/etc/apt/apt.conf.d/" || true
 
-#apt: emulate apt-get clean:
-echo '#Custom apt-get clean' > /tmp/02apt-get-clean
-echo 'DPkg::Post-Invoke { "rm -f /var/cache/apt/archives/*.deb /var/cache/apt/archives/partial/*.deb || true"; };' >> /tmp/02apt-get-clean
-echo 'APT::Update::Post-Invoke { "rm -f /var/cache/apt/archives/*.deb /var/cache/apt/archives/partial/*.deb || true"; };' >> /tmp/02apt-get-clean
-sudo mv /tmp/02apt-get-clean "${tempdir}/etc/apt/apt.conf.d/02apt-get-clean"
+
+if [ "x${chroot_very_small_image}" = "xenable" ] ; then
+	#apt: emulate apt-get clean:
+	echo '#Custom apt-get clean' > /tmp/02apt-get-clean
+	echo 'DPkg::Post-Invoke { "rm -f /var/cache/apt/archives/*.deb /var/cache/apt/archives/partial/*.deb || true"; };' >> /tmp/02apt-get-clean
+	echo 'APT::Update::Post-Invoke { "rm -f /var/cache/apt/archives/*.deb /var/cache/apt/archives/partial/*.deb || true"; };' >> /tmp/02apt-get-clean
+	sudo mv /tmp/02apt-get-clean "${tempdir}/etc/apt/apt.conf.d/02apt-get-clean"
+	sudo chown root:root "${tempdir}/etc/apt/apt.conf.d/02apt-get-clean"
+fi
 
 #apt: drop translations
 echo 'Acquire::Languages "none";' > /tmp/02-no-languages
 sudo mv /tmp/02-no-languages "${tempdir}/etc/apt/apt.conf.d/02-no-languages"
+sudo chown root:root "${tempdir}/etc/apt/apt.conf.d/02-no-languages"
+
+#apt: no PDiffs..
+echo 'Acquire::PDiffs "0";' > /tmp/02-no-pdiffs
+sudo mv /tmp/02-no-pdiffs "${tempdir}/etc/apt/apt.conf.d/02-no-pdiffs"
+sudo chown root:root "${tempdir}/etc/apt/apt.conf.d/02-no-pdiffs"
+
+if [ "x${chroot_very_small_image}" = "xenable" ] ; then
+	if [ "x${deb_distribution}" = "xdebian" ] ; then
+		#apt: /var/lib/apt/lists/, store compressed only
+		case "${deb_codename}" in
+		stretch|buster)
+			echo 'Acquire::GzipIndexes "true"; APT::Compressor::xz::Cost "40";' > /tmp/02compress-indexes
+			sudo mv /tmp/02compress-indexes "${tempdir}/etc/apt/apt.conf.d/02compress-indexes"
+			sudo chown root:root "${tempdir}/etc/apt/apt.conf.d/02compress-indexes"
+			;;
+		bullseye|sid)
+			###FIXME: close to release switch to ^ xz, right now <next> is slow on apt...
+			echo 'Acquire::GzipIndexes "true"; APT::Compressor::gzip::Cost "40";' > /tmp/02compress-indexes
+			sudo mv /tmp/02compress-indexes "${tempdir}/etc/apt/apt.conf.d/02compress-indexes"
+			sudo chown root:root "${tempdir}/etc/apt/apt.conf.d/02compress-indexes"
+			;;
+		esac
+	fi
+fi
 
 if [ "x${deb_distribution}" = "xdebian" ] ; then
-	#apt: /var/lib/apt/lists/, store compressed only
-	case "${deb_codename}" in
-	stretch|buster)
-		echo 'Acquire::GzipIndexes "true"; APT::Compressor::xz::Cost "40";' > /tmp/02compress-indexes
-		sudo mv /tmp/02compress-indexes "${tempdir}/etc/apt/apt.conf.d/02compress-indexes"
-		;;
-	sid)
-		###FIXME: close to release switch to ^ xz, right now <next> is slow on apt...
-		echo 'Acquire::GzipIndexes "true"; APT::Compressor::gzip::Cost "40";' > /tmp/02compress-indexes
-		sudo mv /tmp/02compress-indexes "${tempdir}/etc/apt/apt.conf.d/02compress-indexes"
-		;;
-	esac
-
 	if [ "${apt_proxy}" ] ; then
 		#apt: make sure apt-cacher-ng doesn't break https repos
 		echo 'Acquire::http::Proxy::deb.nodesource.com "DIRECT";' > /tmp/03-proxy-https
 		sudo mv /tmp/03-proxy-https "${tempdir}/etc/apt/apt.conf.d/03-proxy-https"
+		sudo chown root:root "${tempdir}/etc/apt/apt.conf.d/03-proxy-https"
 	fi
 fi
 
@@ -358,7 +385,7 @@ echo "" >> ${wfile}
 
 #https://wiki.debian.org/StableUpdates
 case "${deb_codename}" in
-sid)
+bullseye|sid)
 	echo "#deb http://${deb_mirror} ${deb_codename}-updates ${deb_components}" >> ${wfile}
 	echo "##deb-src http://${deb_mirror} ${deb_codename}-updates ${deb_components}" >> ${wfile}
 	echo "" >> ${wfile}
@@ -377,7 +404,7 @@ stretch|buster)
 	echo "#deb-src http://deb.debian.org/debian-security ${deb_codename}/updates ${deb_components}" >> ${wfile}
 	echo "" >> ${wfile}
 	;;
-sid)
+bullseye|sid)
 	echo "#deb http://deb.debian.org/debian-security ${deb_codename}/updates ${deb_components}" >> ${wfile}
 	echo "##deb-src http://deb.debian.org/debian-security ${deb_codename}/updates ${deb_components}" >> ${wfile}
 	echo "" >> ${wfile}
@@ -449,6 +476,7 @@ fi
 
 if [ -f /tmp/sources.list ] ; then
 	sudo mv /tmp/sources.list "${tempdir}/etc/apt/sources.list"
+	sudo chown root:root "${tempdir}/etc/apt/sources.list"
 fi
 
 if [ "x${repo_external}" = "xenable" ] ; then
@@ -466,6 +494,7 @@ fi
 if [ "${apt_proxy}" ] ; then
 	echo "Acquire::http::Proxy \"http://${apt_proxy}\";" > /tmp/apt.conf
 	sudo mv /tmp/apt.conf "${tempdir}/etc/apt/apt.conf"
+	sudo chown root:root "${tempdir}/etc/apt/apt.conf"
 fi
 
 echo "127.0.0.1	localhost" > /tmp/hosts
@@ -741,8 +770,54 @@ cat > "${DIR}/chroot_script.sh" <<-__EOF__
 				apt-get -y install ${repo_rcnee_sgx_preinstall}-modules-${repo_rcnee_pkg_version} || true
 			fi
 
+			if [ -f /lib/firmware/am335x-pru0-fw.sleep ] ; then
+				cp -v /lib/firmware/am335x-pru0-fw.sleep /lib/firmware/am335x-pru0-fw
+				/bin/chgrp gpio /lib/firmware/am335x-pru0-fw
+				/bin/chmod g=u /lib/firmware/am335x-pru0-fw
+			fi
+
+			if [ -f /lib/firmware/am335x-pru1-fw.sleep ] ; then
+				cp -v /lib/firmware/am335x-pru1-fw.sleep /lib/firmware/am335x-pru1-fw
+				/bin/chgrp gpio /lib/firmware/am335x-pru1-fw
+				/bin/chmod g=u /lib/firmware/am335x-pru1-fw
+			fi
+
+			if [ -f /lib/firmware/am57xx-pru1_0-fw.sleep ] ; then
+				cp -v /lib/firmware/am57xx-pru1_0-fw.sleep /lib/firmware/am57xx-pru1_0-fw
+				/bin/chgrp gpio /lib/firmware/am57xx-pru1_0-fw
+				/bin/chmod g=u /lib/firmware/am57xx-pru1_0-fw
+			fi
+
+			if [ -f /lib/firmware/am57xx-pru1_1-fw.sleep ] ; then
+				cp -v /lib/firmware/am57xx-pru1_1-fw.sleep /lib/firmware/am57xx-pru1_1-fw
+				/bin/chgrp gpio /lib/firmware/am57xx-pru1_1-fw
+				/bin/chmod g=u /lib/firmware/am57xx-pru1_1-fw
+			fi
+
+			if [ -f /lib/firmware/am57xx-pru2_0-fw.sleep ] ; then
+				cp -v /lib/firmware/am57xx-pru2_0-fw.sleep /lib/firmware/am57xx-pru2_0-fw
+				/bin/chgrp gpio /lib/firmware/am57xx-pru2_0-fw
+				/bin/chmod g=u /lib/firmware/am57xx-pru2_0-fw
+			fi
+
+			if [ -f /lib/firmware/am57xx-pru2_1-fw.sleep ] ; then
+				cp -v /lib/firmware/am57xx-pru1_1-fw.sleep /lib/firmware/am57xx-pru2_1-fw
+				/bin/chgrp gpio /lib/firmware/am57xx-pru2_1-fw
+				/bin/chmod g=u /lib/firmware/am57xx-pru2_1-fw
+			fi
+
 			depmod -a ${repo_rcnee_pkg_version}
 			update-initramfs -u -k ${repo_rcnee_pkg_version}
+		fi
+	}
+
+	install_python_pkgs () {
+		if [ ! "x${python3_pkgs}" = "x" ] ; then
+			if [ ! "x${python3_extra_index}" = "x" ] ; then
+				python3 -m pip install --extra-index-url ${python3_extra_index} ${python3_pkgs}
+			else
+				python3 -m pip install ${python3_pkgs}
+			fi
 		fi
 	}
 
@@ -760,6 +835,16 @@ cat > "${DIR}/chroot_script.sh" <<-__EOF__
 		# set system type
 		echo "ICON_NAME=computer-embedded" > /etc/machine-info
 		echo "CHASSIS=embedded" >> /etc/machine-info
+
+		#https://github.com/RobertCNelson/omap-image-builder/issues/131
+		if [ -f /var/lib/connman/settings ] ; then
+			echo "Log: (chroot): /var/lib/connman/settings"
+			cat /var/lib/connman/settings
+			sed -i -e 's:OfflineMode=false:OfflineMode=false\nTimezoneUpdates=manual:g' /var/lib/connman/settings
+			sed -i -e 's:OfflineMode=false:OfflineMode=false\nTimeUpdates=manual:g' /var/lib/connman/settings
+			echo "Log: (chroot): Patched: /var/lib/connman/settings"
+			cat /var/lib/connman/settings
+		fi
 	}
 
 	set_locale () {
@@ -896,9 +981,6 @@ cat > "${DIR}/chroot_script.sh" <<-__EOF__
 
 		echo "KERNEL==\"hidraw*\", GROUP=\"plugdev\", MODE=\"0660\"" > /etc/udev/rules.d/50-hidraw.rules
 		echo "KERNEL==\"spidev*\", GROUP=\"spi\", MODE=\"0660\"" > /etc/udev/rules.d/50-spi.rules
-
-		echo "#SUBSYSTEM==\"uio\", SYMLINK+=\"uio/%s{device/of_node/uio-alias}\"" > /etc/udev/rules.d/uio.rules
-		echo "SUBSYSTEM==\"uio\", GROUP=\"users\", MODE=\"0660\"" >> /etc/udev/rules.d/uio.rules
 
 		echo "SUBSYSTEM==\"cmem\", GROUP=\"tisdk\", MODE=\"0660\"" > /etc/udev/rules.d/tisdk.rules
 		echo "SUBSYSTEM==\"rpmsg_rpc\", GROUP=\"tisdk\", MODE=\"0660\"" >> /etc/udev/rules.d/tisdk.rules
@@ -1146,6 +1228,7 @@ cat > "${DIR}/chroot_script.sh" <<-__EOF__
 
 	install_pkg_updates
 	install_pkgs
+	install_python_pkgs
 	system_tweaks
 	set_locale
 	if [ "x${chroot_not_reliable_deborphan}" = "xenable" ] ; then
@@ -1390,6 +1473,8 @@ cat > "${DIR}/cleanup_script.sh" <<-__EOF__
 		apt-get clean
 		rm -rf /var/lib/apt/lists/*
 
+		rm -rf /root/.cache/pip
+
 		if [ -d /var/cache/c9-core-installer/ ] ; then
 			rm -rf /var/cache/c9-core-installer/ || true
 		fi
@@ -1465,6 +1550,10 @@ if [ -f "${tempdir}/usr/bin/qemu-aarch64-static" ] ; then
 	sudo rm -f "${tempdir}/usr/bin/qemu-aarch64-static" || true
 fi
 
+if [ -f "${tempdir}/usr/bin/qemu-riscv64-static" ] ; then
+	sudo rm -f "${tempdir}/usr/bin/qemu-riscv64-static" || true
+fi
+
 echo "${rfs_username}:${rfs_password}" > /tmp/user_password.list
 sudo mv /tmp/user_password.list "${DIR}/deploy/${export_filename}/user_password.list"
 
@@ -1518,8 +1607,15 @@ fi
 if [ "x${chroot_directory}" = "xenable" ]; then
 	echo "Log: moving rootfs to directory: [${deb_arch}-rootfs-${deb_distribution}-${deb_codename}]"
 	sudo mv -v "${tempdir}" "${DIR}/deploy/${export_filename}/${deb_arch}-rootfs-${deb_distribution}-${deb_codename}"
-	du -h --max-depth=0 "${DIR}/deploy/${export_filename}/${deb_arch}-rootfs-${deb_distribution}-${deb_codename}"
+	sudo du -h --max-depth=0 "${DIR}/deploy/${export_filename}/${deb_arch}-rootfs-${deb_distribution}-${deb_codename}"
 else
+	cd "${tempdir}" || true
+	if [ -d ./opt/u-boot/ ] ; then
+		cd ./opt/u-boot/ || true
+		echo "Copying: packaged version of U-Boot"
+		mkdir -p "${DIR}/deploy/${export_filename}/u-boot"
+		cp -rv ./* "${DIR}/deploy/${export_filename}/u-boot"
+	fi
 	cd "${tempdir}" || true
 	echo "Log: packaging rootfs: [${deb_arch}-rootfs-${deb_distribution}-${deb_codename}.tar]"
 	sudo LANG=C tar --numeric-owner -cf "${DIR}/deploy/${export_filename}/${deb_arch}-rootfs-${deb_distribution}-${deb_codename}.tar" .

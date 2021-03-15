@@ -39,6 +39,10 @@ if [ -f configs/kernel.data ] ; then
 	git_msg="4.19.x-bone-rt"
 	var="bone-rt"    ; ver="LTS419" ; current_kernel
 
+	git_msg="5.10.x-bone"
+	#var="omap-psp"   ; ver="V58X" ; current_kernel
+	var="omap-psp"   ; ver="LTS510" ; current_kernel
+
 	git_msg="4.14.x-ti"
 	filter1="rt"
 	filter2="rt"
