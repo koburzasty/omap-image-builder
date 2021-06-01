@@ -245,21 +245,25 @@ check_defines
 
 if [ "x${host_arch}" != "xarmv7l" ] && [ "x${host_arch}" != "xaarch64" ] ; then
 	if [ "x${deb_arch}" = "xarmel" ] || [ "x${deb_arch}" = "xarmhf" ] ; then
-		sudo cp $(which qemu-arm-static) "${tempdir}/usr/bin/"
+		echo "sudo cp -v $(which qemu-arm-static) \"${tempdir}/usr/bin/\""
+		sudo cp -v $(which qemu-arm-static) "${tempdir}/usr/bin/"
 	fi
 	if [ "x${deb_arch}" = "xarm64" ] ; then
-		sudo cp $(which qemu-aarch64-static) "${tempdir}/usr/bin/"
+		echo "sudo cp -v $(which qemu-aarch64-static) \"${tempdir}/usr/bin/\""
+		sudo cp -v $(which qemu-aarch64-static) "${tempdir}/usr/bin/"
 	fi
 fi
 
 if [ "x${host_arch}" != "xriscv64" ] ; then
 	if [ "x${deb_arch}" = "xriscv64" ] ; then
-		sudo cp $(which qemu-riscv64-static) "${tempdir}/usr/bin/"
+		echo "sudo cp -v $(which qemu-riscv64-static) \"${tempdir}/usr/bin/\""
+		sudo cp -v $(which qemu-riscv64-static) "${tempdir}/usr/bin/"
 	fi
 fi
 
 chroot_mount_run
 echo "Log: Running: debootstrap second-stage in [${tempdir}]"
+echo "Log: [sudo chroot "${tempdir}" debootstrap/debootstrap --second-stage]"
 sudo chroot "${tempdir}" debootstrap/debootstrap --second-stage
 echo "Log: Complete: [sudo chroot ${tempdir} debootstrap/debootstrap --second-stage]"
 report_size
@@ -356,7 +360,7 @@ if [ "x${chroot_very_small_image}" = "xenable" ] ; then
 			sudo mv /tmp/02compress-indexes "${tempdir}/etc/apt/apt.conf.d/02compress-indexes"
 			sudo chown root:root "${tempdir}/etc/apt/apt.conf.d/02compress-indexes"
 			;;
-		bullseye|sid)
+		bullseye|bookworm|sid)
 			###FIXME: close to release switch to ^ xz, right now <next> is slow on apt...
 			echo 'Acquire::GzipIndexes "true"; APT::Compressor::gzip::Cost "40";' > /tmp/02compress-indexes
 			sudo mv /tmp/02compress-indexes "${tempdir}/etc/apt/apt.conf.d/02compress-indexes"
@@ -380,12 +384,15 @@ sudo sh -c "date --utc \"+%4Y%2m%2d%2H%2M\" > ${tempdir}/etc/timestamp"
 
 wfile="/tmp/sources.list"
 echo "deb http://${deb_mirror} ${deb_codename} ${deb_components}" > ${wfile}
+if [ "x${deb_arch}" = "xriscv64" ] ; then
+	echo "deb http://${deb_mirror} unreleased ${deb_components}" >> ${wfile}
+fi
 echo "#deb-src http://${deb_mirror} ${deb_codename} ${deb_components}" >> ${wfile}
 echo "" >> ${wfile}
 
 #https://wiki.debian.org/StableUpdates
 case "${deb_codename}" in
-bullseye|sid)
+bullseye|bookworm|sid)
 	echo "#deb http://${deb_mirror} ${deb_codename}-updates ${deb_components}" >> ${wfile}
 	echo "##deb-src http://${deb_mirror} ${deb_codename}-updates ${deb_components}" >> ${wfile}
 	echo "" >> ${wfile}
@@ -404,7 +411,7 @@ stretch|buster)
 	echo "#deb-src http://deb.debian.org/debian-security ${deb_codename}/updates ${deb_components}" >> ${wfile}
 	echo "" >> ${wfile}
 	;;
-bullseye|sid)
+bullseye|bookworm|sid)
 	echo "#deb http://deb.debian.org/debian-security ${deb_codename}/updates ${deb_components}" >> ${wfile}
 	echo "##deb-src http://deb.debian.org/debian-security ${deb_codename}/updates ${deb_components}" >> ${wfile}
 	echo "" >> ${wfile}
@@ -423,9 +430,9 @@ if [ "x${chroot_enable_debian_backports}" = "xenable" ] ; then
 fi
 
 if [ "x${repo_external}" = "xenable" ] ; then
-	echo "" >> ${wfile}
 	echo "deb [arch=${repo_external_arch}] ${repo_external_server} ${repo_external_dist} ${repo_external_components}" >> ${wfile}
 	echo "#deb-src [arch=${repo_external_arch}] ${repo_external_server} ${repo_external_dist} ${repo_external_components}" >> ${wfile}
+	echo "" >> ${wfile}
 fi
 
 if [ "x${repo_flat}" = "xenable" ] ; then
@@ -433,11 +440,11 @@ if [ "x${repo_flat}" = "xenable" ] ; then
 	for component in "${repo_flat_components[@]}" ; do
 		echo "deb ${repo_flat_server} ${component}" >> ${wfile}
 		echo "#deb-src ${repo_flat_server} ${component}" >> ${wfile}
+		echo "" >> ${wfile}
 	done
 fi
 
 if [ ! "x${repo_nodesource}" = "x" ] ; then
-	echo "" >> ${wfile}
 	echo "deb https://deb.nodesource.com/${repo_nodesource} ${repo_nodesource_dist} main" >> ${wfile}
 	echo "#deb-src https://deb.nodesource.com/${repo_nodesource} ${repo_nodesource_dist} main" >> ${wfile}
 	echo "" >> ${wfile}
@@ -445,33 +452,44 @@ if [ ! "x${repo_nodesource}" = "x" ] ; then
 fi
 
 if [ "x${repo_azulsystems}" = "xenable" ] ; then
-	echo "" >> ${wfile}
 	echo "deb http://repos.azulsystems.com/${deb_distribution} stable main" >> ${wfile}
 	echo "" >> ${wfile}
 	sudo cp -v "${OIB_DIR}/target/keyring/repos.azulsystems.com.pubkey.asc" "${tempdir}/tmp/repos.azulsystems.com.pubkey.asc"
 fi
 
-if [ "x${repo_rcnee}" = "xenable" ] ; then
-	#no: precise
+if [ "x${repo_ros}" = "xenable" ] ; then
+	repo_ros_arch=${repo_ros_arch:-"armhf"}
+	echo "deb [arch=${repo_ros_arch}] http://packages.ros.org/ros/${deb_distribution} ${deb_codename} main" >> ${wfile}
+	echo "#deb-src [arch=${repo_ros_arch}] http://packages.ros.org/ros/${deb_distribution} ${deb_codename} main" >> ${wfile}
 	echo "" >> ${wfile}
+	sudo cp -v "${OIB_DIR}/target/keyring/ros-archive-keyring.asc" "${tempdir}/tmp/ros-archive-keyring.asc"
+fi
+
+if [ "x${repo_rcnee}" = "xenable" ] ; then
+	repo_rcnee_arch=${repo_rcnee_arch:-"armhf"}
+	repo_rcnee_mirror=${repo_rcnee_mirror:-"repos.rcn-ee.com"}
+
+	#adding two new archives arm64, riscv64...
+	if [ "x${repo_rcnee_arch}" = "xarmhf" ] ; then
+		#armhf -> debian
+		rcnee_url_directory="${deb_distribution}"
+	else
+		#arm64 -> debian-arm64, riscv64 -> debian-riscv64
+		rcnee_url_directory="${deb_distribution}-${repo_rcnee_arch}"
+		if [ "x${repo_rcnee_mirror}" = "xdebian.beagle.cc" ] ; then
+			rcnee_url_directory="${repo_rcnee_arch}"
+		fi
+	fi
+
 	echo "#Kernel source (repos.rcn-ee.com) : https://github.com/RobertCNelson/linux-stable-rcn-ee" >> ${wfile}
 	echo "#" >> ${wfile}
 	echo "#git clone https://github.com/RobertCNelson/linux-stable-rcn-ee" >> ${wfile}
 	echo "#cd ./linux-stable-rcn-ee" >> ${wfile}
 	echo "#git checkout \`uname -r\` -b tmp" >> ${wfile}
 	echo "#" >> ${wfile}
-	echo "deb [arch=armhf] http://repos.rcn-ee.com/${deb_distribution}/ ${deb_codename} main" >> ${wfile}
-	echo "#deb-src [arch=armhf] http://repos.rcn-ee.com/${deb_distribution}/ ${deb_codename} main" >> ${wfile}
-
+	echo "deb [arch=${repo_rcnee_arch}] http://${repo_rcnee_mirror}/${rcnee_url_directory}/ ${deb_codename} main" >> ${wfile}
+	echo "#deb-src [arch=${repo_rcnee_arch}] http://${repo_rcnee_mirror}/${rcnee_url_directory}/ ${deb_codename} main" >> ${wfile}
 	sudo cp -v "${OIB_DIR}/target/keyring/repos.rcn-ee.net-archive-keyring.asc" "${tempdir}/tmp/repos.rcn-ee.net-archive-keyring.asc"
-fi
-
-if [ "x${repo_ros}" = "xenable" ] ; then
-	echo "" >> ${wfile}
-	echo "deb [arch=armhf] http://packages.ros.org/ros/${deb_distribution} ${deb_codename} main" >> ${wfile}
-	echo "#deb-src [arch=armhf] http://packages.ros.org/ros/${deb_distribution} ${deb_codename} main" >> ${wfile}
-
-	sudo cp -v "${OIB_DIR}/target/keyring/ros-archive-keyring.asc" "${tempdir}/tmp/ros-archive-keyring.asc"
 fi
 
 if [ -f /tmp/sources.list ] ; then
@@ -515,7 +533,7 @@ if [ "x${deb_arch}" = "xarmhf" ] ; then
 	case "${deb_distribution}" in
 	debian)
 		case "${deb_codename}" in
-		stretch|buster)
+		stretch|buster|bullseye|bookworm|sid)
 			#while bb-customizations installes "generic-board-startup.service" other boards/configs could use this default.
 			sudo cp "${OIB_DIR}/target/init_scripts/systemd-generic-board-startup.service" "${tempdir}/lib/systemd/system/generic-board-startup.service"
 			sudo chown root:root "${tempdir}/lib/systemd/system/generic-board-startup.service"
@@ -640,6 +658,11 @@ cat > "${DIR}/chroot_script.sh" <<-__EOF__
 		fi
 
 		echo "---------------------------------"
+
+		echo "debug: cat /etc/apt/sources.list-"
+		cat /etc/apt/sources.list
+		echo "---------------------------------"
+
 		echo "debug: apt-get update------------"
 		apt-get update
 		echo "---------------------------------"
@@ -669,37 +692,12 @@ cat > "${DIR}/chroot_script.sh" <<-__EOF__
 			if [ -f /bin/busybox ] ; then
 				echo "Log: (chroot): Setting up BusyBox"
 
-				busybox --install -s /usr/local/bin/
-
-				#conflicts with systemd reboot...
-				#BusyBox v1.22.1 (Debian 1:1.22.0-9+deb8u1) multi-call binary.
-				if [ -f /usr/local/bin/reboot ] ; then
-					rm -f /usr/local/bin/reboot
-				fi
-
-				#poweroff: broken...
-				#BusyBox v1.22.1 (Debian 1:1.22.0-9+deb8u1) multi-call binary.
-				if [ -f /usr/local/bin/poweroff ] ; then
-					rm -f /usr/local/bin/poweroff
-				fi
-
-				#df: unrecognized option '--portability'
-				#BusyBox v1.22.1 (Debian 1:1.22.0-9+deb8u1) multi-call binary.
-				if [ -f /usr/local/bin/df ] ; then
-					rm -f /usr/local/bin/df
-				fi
-
-				#tar: unrecognized option '--warning=no-timestamp'
-				#BusyBox v1.22.1 (Debian 1:1.22.0-9+deb8u1) multi-call binary.
-				if [ -f /usr/local/bin/tar ] ; then
-					rm -f /usr/local/bin/tar
-				fi
-
-				#run-parts: unrecognized option '--list'
-				#BusyBox v1.22.1 (Debian 1:1.22.0-9+deb8u1) multi-call binary.
-				if [ -f /usr/local/bin/run-parts ] ; then
-					rm -f /usr/local/bin/run-parts
-				fi
+				#Install only non-existent commands to avoid conflicts
+				for cmd in \$(busybox --list)
+				do
+					type \${cmd} >/dev/null 2>&1 ||
+						ln -s /bin/busybox /usr/local/bin/\${cmd}
+				done
 			fi
 		fi
 	}
@@ -1115,11 +1113,20 @@ cat > "${DIR}/chroot_script.sh" <<-__EOF__
 			echo "Log: (chroot): enabling: systemd-timesyncd.service"
 			systemctl enable systemd-timesyncd.service || true
 
+			#systemd v232: (Debian Stretch)
 			#set our own initial date stamp, otherwise we get July 2014
 			touch /var/lib/systemd/clock
 
 			#if systemd-timesync user exits, use that instead. (this user was removed in later systemd's)
 			cat /etc/group | grep ^systemd-timesync && chown systemd-timesync:systemd-timesync /var/lib/systemd/clock || true
+
+			#systemd v235+: (Debian Buster/Bullseye)
+			#set our own initial date stamp, otherwise we get July 2014
+			mkdir -p /var/lib/systemd/timesync/ || true
+			touch /var/lib/systemd/timesync/clock
+
+			#if systemd-timesync user exits, use that instead. (this user was removed in later systemd's)
+			cat /etc/group | grep ^systemd-timesync && chown systemd-timesync:systemd-timesync /var/lib/systemd/timesync/clock || true
 
 			#Remove ntpdate
 			if [ -f /usr/sbin/ntpdate ] ; then
@@ -1562,6 +1569,8 @@ if [ -d "${tempdir}/etc/ssh/" -a "x${keep_ssh_keys}" = "x" ] ; then
 	#Remove pre-generated ssh keys, these will be regenerated on first bootup...
 	sudo rm -rf "${tempdir}"/etc/ssh/ssh_host_* || true
 	sudo touch "${tempdir}/etc/ssh/ssh.regenerate" || true
+	#Remove machine-id, this will be regenerated on first bootup...
+	sudo rm -f "${tempdir}"/etc/machine-id || true
 fi
 
 #ID.txt:
