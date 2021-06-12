@@ -201,15 +201,30 @@ distro_bootloader () {
 	mkdir -p ${TEMPDIR}/dl/
 
 	if [ "${conf_bl_distro_SPL}" ] ; then
-		cp ./${conf_bl_distro_SPL} ${TEMPDIR}/dl/
+		cp -v ./${conf_bl_distro_SPL} ${TEMPDIR}/dl/
 		SPL=${spl_name}
-		echo "SPL Bootloader: ${SPL}"
+		echo "SPL Bootloader: ${conf_bl_distro_SPL}"
 	fi
 
 	if [ "${conf_bl_distro_UBOOT}" ] ; then
-		cp ./${conf_bl_distro_UBOOT} ${TEMPDIR}/dl/
+		cp -v ./${conf_bl_distro_UBOOT} ${TEMPDIR}/dl/
 		UBOOT=${boot_name}
-		echo "UBOOT Bootloader: ${UBOOT}"
+		echo "UBOOT Bootloader: ${conf_bl_distro_UBOOT}"
+	fi
+
+	if [ "x${oem_blank_eeprom}" = "xenable" ] ; then
+		mkdir -p ${TEMPDIR}/dl/oem/
+		if [ "${conf_bl_distro_blank_SPL}" ] ; then
+			cp -v ./${conf_bl_distro_blank_SPL} ${TEMPDIR}/dl/oem/
+			blank_SPL=${spl_name}
+			echo "blank_SPL Bootloader: ${conf_bl_distro_blank_SPL}"
+		fi
+
+		if [ "${conf_bl_distro_blank_UBOOT}" ] ; then
+			cp -v ./${conf_bl_distro_blank_UBOOT} ${TEMPDIR}/dl/oem/
+			blank_UBOOT=${boot_name}
+			echo "blank_UBOOT Bootloader: ${conf_bl_distro_blank_UBOOT}"
+		fi
 	fi
 }
 
@@ -533,9 +548,16 @@ dd_uboot_boot () {
 		uboot_blob="${UBOOT}"
 	fi
 
-	echo "${uboot_name}: dd if=${uboot_blob} of=${media} ${dd_uboot}"
+	wdir="dl"
+	if [ "${USE_DISTRO_BOOTLOADER}" ] ; then
+		if [ "x${oem_blank_eeprom}" = "xenable" ] ; then
+			wdir="dl/oem"
+		fi
+	fi
+
+	echo "${uboot_name}: [dd if=..${wdir}/${uboot_blob} of=${media} ${dd_uboot}]"
 	echo "-----------------------------"
-	dd if=${TEMPDIR}/dl/${uboot_blob} of=${media} ${dd_uboot}
+	dd if=${TEMPDIR}/${wdir}/${uboot_blob} of=${media} ${dd_uboot}
 	echo "-----------------------------"
 }
 
@@ -567,9 +589,16 @@ dd_spl_uboot_boot () {
 		spl_uboot_blob="${SPL}"
 	fi
 
-	echo "${spl_uboot_name}: dd if=${spl_uboot_blob} of=${media} ${dd_spl_uboot}"
+	wdir="dl"
+	if [ "${USE_DISTRO_BOOTLOADER}" ] ; then
+		if [ "x${oem_blank_eeprom}" = "xenable" ] ; then
+			wdir="dl/oem"
+		fi
+	fi
+
+	echo "${spl_uboot_name}: [dd if=../${wdir}/${spl_uboot_blob} of=${media} ${dd_spl_uboot}]"
 	echo "-----------------------------"
-	dd if=${TEMPDIR}/dl/${spl_uboot_blob} of=${media} ${dd_spl_uboot}
+	dd if=${TEMPDIR}/${wdir}/${spl_uboot_blob} of=${media} ${dd_spl_uboot}
 	echo "-----------------------------"
 }
 
@@ -1531,7 +1560,7 @@ populate_rootfs () {
 	fi
 
 	cat ${wfile}
-	sudo chown -R 1000:1000 ${wfile}
+	chown -R 1000:1000 ${wfile}
 	echo "-----------------------------"
 
 	wfile="${TEMPDIR}/disk/boot/SOC.sh"
@@ -1643,15 +1672,24 @@ populate_rootfs () {
 
 	fi #RootStock-NG
 
-	if [ ! "x${uboot_name}" = "x" ] ; then
-		echo "Backup version of u-boot: /opt/backup/uboot/"
+	if [ ! "x${spl_uboot_name}" = "x" ] ; then
+		echo "Backup version of u-boot (${spl_uboot_name}): /opt/backup/uboot/"
 		mkdir -p ${TEMPDIR}/disk/opt/backup/uboot/
-		cp -v ${TEMPDIR}/dl/${UBOOT} ${TEMPDIR}/disk/opt/backup/uboot/${uboot_name}
+		if [ "${conf_bl_distro_SPL}" ] ; then
+			cp -v ./${conf_bl_distro_SPL} ${TEMPDIR}/disk/opt/backup/uboot/${spl_uboot_name}
+		else
+			cp -v ${TEMPDIR}/dl/${SPL} ${TEMPDIR}/disk/opt/backup/uboot/${spl_uboot_name}
+		fi
 	fi
 
-	if [ ! "x${spl_uboot_name}" = "x" ] ; then
+	if [ ! "x${uboot_name}" = "x" ] ; then
+		echo "Backup version of u-boot (${uboot_name}): /opt/backup/uboot/"
 		mkdir -p ${TEMPDIR}/disk/opt/backup/uboot/
-		cp -v ${TEMPDIR}/dl/${SPL} ${TEMPDIR}/disk/opt/backup/uboot/${spl_uboot_name}
+		if [ "${conf_bl_distro_UBOOT}" ] ; then
+			cp -v ./${conf_bl_distro_UBOOT} ${TEMPDIR}/disk/opt/backup/uboot/${uboot_name}
+		else
+			cp -v ${TEMPDIR}/dl/${UBOOT} ${TEMPDIR}/disk/opt/backup/uboot/${uboot_name}
+		fi
 	fi
 
 	if [ ! -f ${TEMPDIR}/etc/udev/rules.d/60-omap-tty.rules ] ; then
@@ -1676,29 +1714,29 @@ populate_rootfs () {
 	if [ ! "x${conf_kernel}" = "xriscv" ] ; then
 		if [ ! -f ${TEMPDIR}/disk/opt/scripts/boot/generic-startup.sh ] ; then
 			git clone https://github.com/RobertCNelson/boot-scripts ${TEMPDIR}/disk/opt/scripts/ --depth 1
-			sudo chown -R 1000:1000 ${TEMPDIR}/disk/opt/scripts/
+			chown -R 1000:1000 ${TEMPDIR}/disk/opt/scripts/
 			if [ ! -f ${TEMPDIR}/disk/etc/default/bb-boot ] ; then
-				sudo cp -v ${TEMPDIR}/disk/opt/scripts/boot/default/bb-boot ${TEMPDIR}/disk/etc/default/
+				cp -v ${TEMPDIR}/disk/opt/scripts/boot/default/bb-boot ${TEMPDIR}/disk/etc/default/
 			fi
 		else
 			cd ${TEMPDIR}/disk/opt/scripts/
 			git pull
 			cd -
-			sudo chown -R 1000:1000 ${TEMPDIR}/disk/opt/scripts/
+			chown -R 1000:1000 ${TEMPDIR}/disk/opt/scripts/
 		fi
 	fi
 
 	if [ "x${drm}" = "xomapdrm" ] ; then
 		wfile="/etc/X11/xorg.conf"
 		if [ -f ${TEMPDIR}/disk${wfile} ] ; then
-			sudo sed -i -e 's:modesetting:omap:g' ${TEMPDIR}/disk${wfile}
-			sudo sed -i -e 's:fbdev:omap:g' ${TEMPDIR}/disk${wfile}
+			sed -i -e 's:modesetting:omap:g' ${TEMPDIR}/disk${wfile}
+			sed -i -e 's:fbdev:omap:g' ${TEMPDIR}/disk${wfile}
 
 			if [ "x${conf_board}" = "xomap3_beagle" ] ; then
-				sudo sed -i -e 's:#HWcursor_false::g' ${TEMPDIR}/disk${wfile}
-				sudo sed -i -e 's:#DefaultDepth::g' ${TEMPDIR}/disk${wfile}
+				sed -i -e 's:#HWcursor_false::g' ${TEMPDIR}/disk${wfile}
+				sed -i -e 's:#DefaultDepth::g' ${TEMPDIR}/disk${wfile}
 			else
-				sudo sed -i -e 's:#HWcursor_false::g' ${TEMPDIR}/disk${wfile}
+				sed -i -e 's:#HWcursor_false::g' ${TEMPDIR}/disk${wfile}
 			fi
 		fi
 	fi
@@ -1707,8 +1745,8 @@ populate_rootfs () {
 		wfile="/etc/X11/xorg.conf"
 		if [ -f ${TEMPDIR}/disk${wfile} ] ; then
 			if [ -f ${TEMPDIR}/disk/usr/lib/xorg/modules/drivers/armada_drv.so ] ; then
-				sudo sed -i -e 's:modesetting:armada:g' ${TEMPDIR}/disk${wfile}
-				sudo sed -i -e 's:fbdev:armada:g' ${TEMPDIR}/disk${wfile}
+				sed -i -e 's:modesetting:armada:g' ${TEMPDIR}/disk${wfile}
+				sed -i -e 's:fbdev:armada:g' ${TEMPDIR}/disk${wfile}
 			fi
 		fi
 	fi
