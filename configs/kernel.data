@@ -1,10 +1,10 @@
 armv7 LTS54 5.4.123-armv7-x53
 bone-rt LTS419 4.19.191-bone-rt-r67
-omap-psp LTS510 5.10.41-bone39
+omap-psp LTS510 5.10.41-bone41
 ti LTS414 4.14.108-ti-r143
 ti-rt LTS414 4.14.108-ti-rt-r143
 ti LTS419 4.19.94-ti-r64
 ti-rt LTS419 4.19.94-ti-rt-r64
 ti LTS54 5.4.106-ti-r32
 ti-rt LTS54 5.4.106-ti-rt-r32
-riscv64 V513X 5.13.0-rc5-riscv64-r8
+riscv64 V513X 5.13.0-rc6-riscv64-r10
